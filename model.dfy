@@ -7,31 +7,41 @@ module CBF {
   import opened Types
 
   datatype Label =
-    | IncrementLabel(req: Page)
-    | DecrementLabel(req: Page)
+    | IncrementLabel(page: Page)
+    | DecrementLabel(page: Page)
 
-  datatype Variables = Variables()
+  datatype Variables = Variables(
+    counts: imap<Page, int>
+  )
   {
+    predicate WF() {
+      forall page :: page in counts
+    }
+
     // weird extra "peek-only" state interface
     predicate IsLocked(page: Page)
+      requires WF()
     {
-      true // TODO
+      counts[page] > 0
     }
   }
 
   predicate Init(v: Variables)
   {
-    true // TODO
+    && v.WF()
+    && (forall page :: v.counts[page] == 0)
   }
 
   predicate Increment(v: Variables, v': Variables, page: Page)
   {
-    true // TODO
+    && v.WF()
+    && v' == v.(counts := v.counts[page := v.counts[page] + 1])
   }
 
   predicate Decrement(v: Variables, v': Variables, page: Page)
   {
-    true // TODO
+    && v.WF()
+    && v' == v.(counts := v.counts[page := v.counts[page] - 1])
   }
 
   predicate Next(v: Variables, v': Variables, lbl: Label)
@@ -55,6 +65,12 @@ module System {
     fifo: Fifo,
     cacheFilter: CBF.Variables,
     fifoFilter: CBF.Variables)
+  {
+    predicate WF() {
+      && cacheFilter.WF()
+      && fifoFilter.WF()
+    }
+  }
 
   predicate Init(v: Variables)
   {
@@ -66,10 +82,12 @@ module System {
 
   predicate AdmitNowEnabled(v: Variables, req: Request)
   {
+    && v.WF()
     && !(v.cacheFilter.IsLocked(req.page) || v.fifoFilter.IsLocked(req.page))
   }
   predicate AdmitNow(v: Variables, v': Variables, req: Request)
   {
+    && v.WF()
     && AdmitNowEnabled(v, req)
     && CBF.Next(v.cacheFilter, v'.cacheFilter, CBF.IncrementLabel(req.page))
     && v' == v.(
@@ -80,6 +98,7 @@ module System {
 
   predicate AdmitFifo(v: Variables, v': Variables, req: Request)
   {
+    && v.WF()
     && !AdmitNowEnabled(v, req)
     && CBF.Next(v.fifoFilter, v'.fifoFilter, CBF.IncrementLabel(req.page))
     && v' == v.(
@@ -90,6 +109,7 @@ module System {
 
   predicate ReleaseFifo(v: Variables, v': Variables, req: Request)
   {
+    && v.WF()
     && 0 < |v.fifo|
     && req == v.fifo[0]   // Request must be the first thing in line
     && !v.cacheFilter.IsLocked(req.page)
@@ -105,6 +125,7 @@ module System {
 
   predicate Retire(v: Variables, v': Variables, req: Request)
   {
+    && v.WF()
     && req in v.cache
     && CBF.Next(v.cacheFilter, v'.cacheFilter, CBF.DecrementLabel(req.page))
     && v' == v.(
