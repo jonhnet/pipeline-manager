@@ -206,6 +206,10 @@ module SystemProof {
     requires Next(v, v')
     ensures Inv(v')
   {
+    forall req ensures NoBypass(v, req) {
+    }
+    forall req ensures NoStalling(v, req) {
+    }
   }
 
   lemma InvImpliesSafety(v: Variables)
