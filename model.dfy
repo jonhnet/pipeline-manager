@@ -183,10 +183,38 @@ module SystemProof {
 
   // Proof machinery
 
-  predicate NoBypassEquiv(v: Variables, req: Request)
+  // A definition equivalent to NoBypass, but entirely in universal-quantifer-land
+
+  predicate FifoIndexDoesntMatchRequest(v: Variables, req: Request, idx: nat)
   {
-    (forall idx :: 0 <= idx < |v.fifo| && v.fifo[idx].page != req.page)
-      || !AdmitNowEnabled(v, req)
+    0 <= idx < |v.fifo| && v.fifo[idx].page != req.page
+  }
+
+  predicate NoFifoMemberMatchesRequest(v: Variables, req: Request)
+  {
+    (forall idx :: FifoIndexDoesntMatchRequest(v, req, idx))
+  }
+
+  predicate NoBypassForall(v: Variables, req: Request)
+  {
+    NoFifoMemberMatchesRequest(v, req) || !AdmitNowEnabled(v, req)
+  }
+
+  lemma NoBypassEquivalence(v: Variables, req: Request)
+    ensures NoBypass(v, req) <==> NoBypassForall(v, req)
+  {
+    if NoBypass(v, req) {
+      if !(exists idx :: 0 <= idx < |v.fifo| && v.fifo[idx].page == req.page) {
+        forall idx ensures FifoIndexDoesntMatchRequest(v, req, idx) {
+          assume false;
+        }
+        assert NoFifoMemberMatchesRequest(v, req);
+        assert NoBypassForall(v, req);
+      }
+    }
+    if NoBypassForall(v, req) {
+      assert NoBypass(v, req);
+    }
   }
 
   predicate Inv(v: Variables)
@@ -206,9 +234,13 @@ module SystemProof {
     requires Next(v, v')
     ensures Inv(v')
   {
-    forall req ensures NoBypass(v, req) {
+    forall req ensures NoBypass(v', req) {
+      assume false;
+      assert NoBypassForall(v', req); // do our proof on the "easy" definition
+      NoBypassEquivalence(v', req); // convert to the official one
     }
-    forall req ensures NoStalling(v, req) {
+    forall req ensures NoStalling(v', req) {
+      assume false;
     }
   }
 
