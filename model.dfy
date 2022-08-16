@@ -19,6 +19,10 @@ module CBF {
     }
   }
 
+  predicate Init(v: Variables)
+  {
+    true // TODO
+  }
 
   predicate Increment(v: Variables, v': Variables, page: Page)
   {
@@ -43,8 +47,8 @@ module System {
   import opened Types
   import CBF
 
-  type Fifo = seq<Request>
   type Cache = set<Request>
+  type Fifo = seq<Request>
 
   datatype Variables = Variables(
     cache: Cache,
@@ -52,9 +56,21 @@ module System {
     cacheFilter: CBF.Variables,
     fifoFilter: CBF.Variables)
 
-  predicate AdmitNow(v: Variables, v': Variables, req: Request)
+  predicate Init(v: Variables)
+  {
+    && v.cache == {}
+    && v.fifo == []
+    && CBF.Init(v.cacheFilter)
+    && CBF.Init(v.fifoFilter)
+  }
+
+  predicate AdmitNowEnabled(v: Variables, req: Request)
   {
     && !(v.cacheFilter.IsLocked(req.page) || v.fifoFilter.IsLocked(req.page))
+  }
+  predicate AdmitNow(v: Variables, v': Variables, req: Request)
+  {
+    && AdmitNowEnabled(v, req)
     && CBF.Next(v.cacheFilter, v'.cacheFilter, CBF.IncrementLabel(req.page))
     && v' == v.(
       cache := v.cache + {req},
@@ -64,7 +80,7 @@ module System {
 
   predicate AdmitFifo(v: Variables, v': Variables, req: Request)
   {
-    && (v.cacheFilter.IsLocked(req.page) || v.fifoFilter.IsLocked(req.page))
+    && !AdmitNowEnabled(v, req)
     && CBF.Next(v.fifoFilter, v'.fifoFilter, CBF.IncrementLabel(req.page))
     && v' == v.(
       fifo := v.fifo + [req],
@@ -123,13 +139,57 @@ module SystemProof {
   import opened System
 
   // If a page is in the fifo, a matching request must enter the fifo
-  predicate NoBypass(v: Variables)
+  predicate NoBypass(v: Variables, req: Request)
   {
+    (exists idx :: 0 <= idx < |v.fifo| && v.fifo[idx].page == req.page)
+      ==> !AdmitNowEnabled(v, req)
   }
 
   // If a page isn't in the cache, a matching request must not enter the fifo
   // Can't actually achieve this with a conservative (but not capricious) fifo
-  predicate NoStalling(v: Variables)
+  predicate NoStalling(v: Variables, req: Request)
+  {
+    (forall activeReq | activeReq in v.cache :: activeReq.page != req.page)
+      ==> AdmitNowEnabled(v, req)
+  }
+
+  // Theorem statement
+  predicate Safety(v: Variables)
+  {
+    && (forall req :: NoBypass(v, req))
+    && (forall req :: NoStalling(v, req))
+  }
+
+  // Proof machinery
+
+  predicate NoBypassEquiv(v: Variables, req: Request)
+  {
+    (forall idx :: 0 <= idx < |v.fifo| && v.fifo[idx].page != req.page)
+      || !AdmitNowEnabled(v, req)
+  }
+
+  predicate Inv(v: Variables)
+  {
+    && Safety(v)
+  }
+
+  // Theorem proof: Inductive conditions for []Safety
+  lemma InitImpliesInv(v: Variables)
+    requires Init(v)
+    ensures Inv(v)
+  {
+  }
+
+  lemma NextPreservesInv(v: Variables, v': Variables)
+    requires Inv(v)
+    requires Next(v, v')
+    ensures Inv(v')
+  {
+  }
+
+  lemma InvImpliesSafety(v: Variables)
+    requires Inv(v)
+    ensures Safety(v)
   {
   }
 }
